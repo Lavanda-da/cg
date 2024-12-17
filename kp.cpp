@@ -25,8 +25,6 @@
 float top = 2.0, bottom = -2.0, right = 2.0, left = -2.0, near = 1.5, far = 10;
 float camera_x = 4.0, camera_y = 3.0, camera_z = 3.0;
 float target_x = 0.0, target_y = 0.0, target_z = 0.0;
-float obj_x = 0, obj_y = 0, obj_z = 0;
-float isTaken = false;
 
 int width = 800, height = 800;
 float lastX = width / 2, lastY = height / 2; // Положение мыши по Y
@@ -168,6 +166,9 @@ struct Object {
     Object(glm::vec3 pos, glm::vec3 rot, glm::vec3 scl)
         : position(pos), rotation(rot), scale(scl) {}
 };
+
+std::vector<Object> objs;
+std::vector<bool> isTaken;
 
 void loadObjectsFromFile(const std::string& filename, std::vector<Object> & objects) {
     std::ifstream file(filename);
@@ -339,29 +340,37 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             glfwSetWindowShouldClose(window, GL_TRUE);
             break;
         case GLFW_KEY_W:
-            if (isTaken) {
-                obj_y += 0.5;
+            for (int i = 0; i < objs.size(); ++i) {
+                if (isTaken[i]) {
+                    objs[i].position[1] += 0.5;
+                }
             }
             camera_y += 0.5;
             target_y += 0.5;
             break;
         case GLFW_KEY_S:
-            if (isTaken) {
-                obj_y -= 0.5;
+            for (int i = 0; i < objs.size(); ++i) {
+                if (isTaken[i]) {
+                    objs[i].position[1] -= 0.5;
+                }
             }
             camera_y -= 0.5;
             target_y -= 0.5;
             break;
         case GLFW_KEY_A:
-            if (isTaken) {
-                obj_z += 0.5;
+            for (int i = 0; i < objs.size(); ++i) {
+                if (isTaken[i]) {
+                    objs[i].position[2] += 0.5;
+                }
             }
             camera_z += 0.5;
             target_z += 0.5;
             break;
         case GLFW_KEY_D:
-            if (isTaken) {
-                obj_z -= 0.5;
+            for (int i = 0; i < objs.size(); ++i) {
+                if (isTaken[i]) {
+                    objs[i].position[2] -= 0.5;
+                }
             }
             camera_z -= 0.5;
             target_z -= 0.5;
@@ -370,11 +379,15 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             isOrtho = !isOrtho;
             break;
         case GLFW_KEY_Z:
-            std::cout << fabs(sqrt(camera_x * camera_x + camera_y * camera_y + camera_z * camera_z) -
-                    sqrt(obj_x * obj_x + obj_y * obj_y + obj_z * obj_z)) << '\n';
-            if (fabs(sqrt(camera_x * camera_x + camera_y * camera_y + camera_z * camera_z) -
-                    sqrt(obj_x * obj_x + obj_y * obj_y + obj_z * obj_z)) < 2)
-            isTaken = !isTaken;
+            for (int i = 0; i < objs.size(); ++i) {
+                float obj_x = objs[i].position[0], obj_y = objs[i].position[1], obj_z = objs[i].position[1];
+                if (sqrt((camera_x - obj_x) * (camera_x - obj_x) + 
+                         (camera_y - obj_y) * (camera_y - obj_y) +
+                         (camera_z - obj_z) * (camera_z - obj_z)) < 1.9) {
+                    isTaken[i] = !isTaken[i];
+                    std::cout << "Here\n";
+                }
+            }
             break;
         }
     }
@@ -391,16 +404,17 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     // Изменяем масштаб в зависимости от прокрутки колеса мыши
     camera_x -= yoffset * 0.1f; // Увеличиваем или уменьшаем масштаб
-    if (isTaken) {
-        obj_x -= yoffset * 0.1f;
+    for (int i = 0; i < objs.size(); ++i) {
+        if (isTaken[i]) {
+            objs[i].position[0] -= yoffset * 0.1f;
+        }
     }
 }
 
 int main() {
-    std::vector<Object> objs;
     loadObjectsFromFile(configFileName, objs);
+    isTaken.resize(objs.size(), false);
 
-    std::cout << objs.size() << '\n';
     // Инициализация GLFW
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -539,8 +553,17 @@ int main() {
 
         // Создание окна ImGui
         ImGui::Begin("Square");
-        ImGui::Text("Push ESC to exit.");
-        ImGui::Text("Type of light");
+        ImGui::Text("Push ESC to exit.\n");
+        ImGui::Text("Amount of objects: %d.\n", objs.size());
+        ImGui::Text("Distance between camera and object:");
+        for (int i = 0; i < objs.size(); ++i) {
+            float obj_x = objs[i].position[0], obj_y = objs[i].position[1], obj_z = objs[i].position[1];
+            float distance = sqrt((camera_x - obj_x) * (camera_x - obj_x) + 
+                         (camera_y - obj_y) * (camera_y - obj_y) +
+                         (camera_z - obj_z) * (camera_z - obj_z));
+            ImGui::Text("%d - %f", i, distance);
+        }
+        ImGui::Text("\nType of light");
         ImGui::RadioButton("Point", &typeOfLight, 0);
         ImGui::RadioButton("Direction", &typeOfLight, 1);
         ImGui::RadioButton("Projector", &typeOfLight, 2);
@@ -603,7 +626,6 @@ int main() {
                 sin(objs[i].rotation[1]), -sin(objs[i].rotation[0]), objs[i].scale[2]*(cos(objs[i].rotation[0]) + cos(objs[i].rotation[1])) / 2.0, 0,
                 objs[i].position[0], objs[i].position[1], objs[i].position[2], 1
             );
-            std::cout << objs[i].scale[0]*(cos(objs[i].rotation[1]) + cos(objs[i].rotation[2])) <<' ' << sin(objs[i].rotation[2]) << ' ' <<  -sin(objs[i].rotation[1]) << '\n';
 
             glm::mat4 view(
                 vx.x, vy.x, vz.x, 0,
@@ -646,11 +668,6 @@ int main() {
                 GLuint cameraLoc = glGetUniformLocation(shaderProgram2, "viewPos");
                 glUniform3f(cameraLoc, camera_x, camera_y, camera_z); // Цвет света
 
-                glm::vec4 p = projection * view * model * glm::vec4(0, 0, 0, 1.0);
-                // std::cout << p.x << ' ' << p.y << ' ' << p.z << '\n';
-                // std::cout << obj_x << ' ' << obj_y << ' ' << obj_z << '\n';
-                // std::cout << camera_x << ' ' << camera_y << ' ' << camera_z << '\n';
-                // std::cout << '\n';
                 GLuint colorLoc = glGetUniformLocation(shaderProgram2, "objectColor");
                 glUniform3f(colorLoc, 1.0f, 0.0f, 0.0f); // Цвет объекта
             } else if (typeOfLight == 2) {
