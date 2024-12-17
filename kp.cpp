@@ -34,6 +34,10 @@ bool isOrtho = true;
 
 int typeOfLight = 1; // 0 - point, 1 - direction, 2 - projector
 
+float radius = 0.5f;
+int sectorCount = 36;
+int stackCount = 18;
+
 std::string configFileName = "config.txt";
 
 struct Vector3
@@ -158,13 +162,100 @@ GLuint indices[] = {
     21, 22, 23
 };
 
+GLfloat plane_vertices[] = {
+    // Позиции           // Нормали
+    0.0f, -0.5f, +0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, +0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, -0.5f, +0.5f,  1.0f, 0.0f, 0.0f,
+    0.0f, -0.5f, +0.5f, -1.0f, 0.0f, 0.0f, 
+    0.0f, -0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    0.0f, +0.5f, +0.5f, -1.0f, 0.0f, 0.0f,
+    0.0f, -0.5f, +0.5f, -1.0f, 0.0f, 0.0f,
+};
+
+GLuint plane_indices[] = {
+    0, 1, 2,
+    3, 4, 5,
+    6, 7, 8,
+    9, 10, 11
+};
+
+std::vector<GLfloat> createSphere(float radius, int sectorCount, int stackCount) {
+    std::vector<GLfloat> vertices;
+
+    float x, y, z, xy; // координаты
+    float nx, ny, nz; // нормали
+
+    float sectorStep = 2 * M_PI / sectorCount;
+    float stackStep = M_PI / stackCount;
+    float sectorAngle, stackAngle;
+
+    for (int i = 0; i <= stackCount; ++i) {
+        stackAngle = M_PI / 2 - i * stackStep; // от π/2 до -π/2
+        xy = radius * cosf(stackAngle); // радиус на уровне стека
+        z = radius * sinf(stackAngle); // высота
+
+        for (int j = 0; j <= sectorCount; ++j) {
+            sectorAngle = j * sectorStep; // угол сектора
+
+            // координаты
+            x = xy * cosf(sectorAngle); // x
+            y = xy * sinf(sectorAngle); // y
+            // нормали
+            nx = x / radius;
+            ny = y / radius;
+            nz = z / radius;
+
+            // добавляем вершину
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
+            vertices.push_back(nx);
+            vertices.push_back(ny);
+            vertices.push_back(nz);
+        }
+    }
+
+    return vertices;
+}
+
+std::vector<GLuint> createSphereIndices(int sectorCount, int stackCount) {
+    std::vector<GLuint> indices;
+
+    for (int i = 0; i < stackCount; ++i) {
+        for (int j = 0; j < sectorCount; ++j) {
+            GLuint first = (i * (sectorCount + 1)) + j;
+            GLuint second = first + sectorCount + 1;
+
+            indices.push_back(first);
+            indices.push_back(second);
+            indices.push_back(first + 1);
+
+            indices.push_back(second);
+            indices.push_back(second + 1);
+            indices.push_back(first + 1);
+        }
+    }
+
+    return indices;
+}
+
+std::vector<GLfloat> sphere_vertices = createSphere(radius, sectorCount, stackCount);
+std::vector<GLuint> sphere_indices = createSphereIndices(sectorCount, stackCount);
+
 struct Object {
+    std::string type ;
     glm::vec3 position;
     glm::vec3 rotation;
     glm::vec3 scale;
 
-    Object(glm::vec3 pos, glm::vec3 rot, glm::vec3 scl)
-        : position(pos), rotation(rot), scale(scl) {}
+    Object(std::string t, glm::vec3 pos, glm::vec3 rot, glm::vec3 scl)
+        : type(t), position(pos), rotation(rot), scale(scl) {}
 };
 
 std::vector<Object> objs;
@@ -178,11 +269,12 @@ void loadObjectsFromFile(const std::string& filename, std::vector<Object> & obje
         std::cerr << "Не удалось открыть файл: " << filename << std::endl;
     }
 
+    std::string type;
     glm::vec3 position, rotation, scale;
-    while (file >> position.x >> position.y >> position.z >>
+    while (file >> type >> position.x >> position.y >> position.z >>
                 rotation.x >> rotation.y >> rotation.z >>
                 scale.x >> scale.y >> scale.z) {
-            objects.emplace_back(position, rotation, scale);
+            objects.emplace_back(type, position, rotation, scale);
     }
 }
 
@@ -385,7 +477,6 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
                          (camera_y - obj_y) * (camera_y - obj_y) +
                          (camera_z - obj_z) * (camera_z - obj_z)) < 1.9) {
                     isTaken[i] = !isTaken[i];
-                    std::cout << "Here\n";
                 }
             }
             break;
@@ -577,23 +668,68 @@ int main() {
         glEnable(GL_DEPTH_TEST);
         
         for (int i = 0; i < objs.size(); ++i) {
-            glBindVertexArray(VAO);
+            int amountOfVertex;
+            if (objs[i].type == "cube") {
+                amountOfVertex = sizeof(indices) / sizeof(indices[0]);
 
-            glBindBuffer(GL_ARRAY_BUFFER, VBO);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+                glBindVertexArray(VAO);
 
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+                glBindBuffer(GL_ARRAY_BUFFER, VBO);
+                glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-            // Установка указателей для вершинного массива
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)0);
-            glEnableVertexAttribArray(0);
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
-            glEnableVertexAttribArray(1);
+                // Установка указателей для вершинного массива
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)0);
+                glEnableVertexAttribArray(0);
 
-            glBindBuffer(GL_ARRAY_BUFFER, 0); // Отвязываем VBO
-            glBindVertexArray(0); // Отвязываем VAO
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+                glEnableVertexAttribArray(1);
+
+                glBindBuffer(GL_ARRAY_BUFFER, 0); // Отвязываем VBO
+                glBindVertexArray(0); // Отвязываем VAO
+            } else if (objs[i].type == "plane") {
+                amountOfVertex = sizeof(plane_indices) / sizeof(plane_indices[0]);
+
+                glBindVertexArray(VAO);
+
+                glBindBuffer(GL_ARRAY_BUFFER, VBO);
+                glBufferData(GL_ARRAY_BUFFER, sizeof(plane_vertices), plane_vertices, GL_STATIC_DRAW);
+
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(plane_indices), plane_indices, GL_STATIC_DRAW);
+
+                // Установка указателей для вершинного массива
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)0);
+                glEnableVertexAttribArray(0);
+
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+                glEnableVertexAttribArray(1);
+
+                glBindBuffer(GL_ARRAY_BUFFER, 0); // Отвязываем VBO
+                glBindVertexArray(0); // Отвязываем VAO
+            } else {
+                amountOfVertex = sphere_indices.size();
+
+                glBindVertexArray(VAO);
+
+                glBindBuffer(GL_ARRAY_BUFFER, VBO);
+                glBufferData(GL_ARRAY_BUFFER, sphere_vertices.size() * sizeof(GLfloat), sphere_vertices.data(), GL_STATIC_DRAW);
+
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphere_indices.size() * sizeof(GLuint), sphere_indices.data(), GL_STATIC_DRAW);
+
+                // Установка указателей для вершинного массива
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)0);
+                glEnableVertexAttribArray(0);
+
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+                glEnableVertexAttribArray(1);
+
+                glBindBuffer(GL_ARRAY_BUFFER, 0); // Отвязываем VBO
+                glBindVertexArray(0); // Отвязываем VAO
+            }
 
             // Использование шейдерной программы
             if (typeOfLight == 0) {
@@ -693,7 +829,7 @@ int main() {
 
             // Рендеринг куба
             glBindVertexArray(VAO);
-            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            glDrawElements(GL_TRIANGLES, amountOfVertex, GL_UNSIGNED_INT, 0);
             glBindVertexArray(0);
             // glfwSwapBuffers(window);
 
